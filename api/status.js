@@ -1,0 +1,1 @@
+module.exports = async function handler(req,res){res.setHeader('Cache-Control','no-store');res.status(200).json({ok:true,toyyibpayConfigured:!!process.env.TOYYIBPAY_SANDBOX_SECRET_KEY,mode:'sandbox'});};
