@@ -1,1 +1,83 @@
-const TP='https://dev.toyyibpay.com';let cachedCategory='';function safeReturn(v){try{const u=new URL(v);if(u.protocol!=='https:'||!u.hostname.endsWith('.websitepublisher.ai'))return'';return'https://project26518.websitepublisher.ai/payment-return.html'}catch{return''}}async function post(url,data){const r=await fetch(url,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams(data)});const t=await r.text();let j=t;try{j=JSON.parse(t)}catch{}if(!r.ok)throw new Error('ToyyibPay HTTP '+r.status+': '+String(t).slice(0,300));return j}async function category(key){if(process.env.TOYYIBPAY_CATEGORY_CODE)return process.env.TOYYIBPAY_CATEGORY_CODE;if(cachedCategory)return cachedCategory;const c=await post(TP+'/index.php/api/createCategory',{catname:'AiBioTech Wallet',catdescription:'AiBioTech wallet coin top ups',userSecretKey:key});const code=Array.isArray(c)&&c[0]&&c[0].CategoryCode;if(!code)throw new Error('Unable to create ToyyibPay category');cachedCategory=String(code);return cachedCategory}module.exports=async function handler(req,res){try{if(req.method!=='GET')return res.status(405).json({ok:false,error:'GET required'});const q=req.query||{};const orderId=Number(q.order_id||0),orderNo=String(q.order_number||''),amount=Number(q.amount_cents||q.total_cents||0),returnSite=safeReturn(String(q.return_site||''));if(!orderId||!orderNo||!Number.isInteger(amount)||amount<100||!returnSite)return res.status(400).json({ok:false,error:'order_id, order_number, amount_cents and valid return_site are required'});const key=process.env.TOYYIBPAY_SANDBOX_SECRET_KEY;if(!key)return res.status(500).json({ok:false,error:'ToyyibPay sandbox secret is not configured'});const host=req.headers['x-forwarded-host']||req.headers.host;const proto=req.headers['x-forwarded-proto']||'https';const base=proto+'://'+host;const code=await category(key);const ext='AIB'+orderId;const data={userSecretKey:key,categoryCode:String(code),billName:('AiBioTech '+orderNo).replace(/[^a-zA-Z0-9 _]/g,' ').slice(0,30),billDescription:('Wallet top up '+orderNo).replace(/[^a-zA-Z0-9 _]/g,' ').slice(0,100),billPriceSetting:'1',billPayorInfo:'1',billAmount:String(amount),billReturnUrl:base+'/api/toyyibpay/return?return_site='+encodeURIComponent(returnSite)+'&order_number='+encodeURIComponent(orderNo),billCallbackUrl:base+'/api/toyyibpay/callback',billExternalReferenceNo:ext,billTo:String(q.customer_name||'AiBioTech Customer').slice(0,80),billEmail:String(q.customer_email||'').slice(0,120),billPhone:String(q.customer_phone||'').slice(0,40),billSplitPayment:'0',billSplitPaymentArgs:'',billPaymentChannel:'0',billContentEmail:'Thank you for your AiBioTech wallet top up.',billChargeToCustomer:'1',billExpiryDays:'1'};const created=await post(TP+'/index.php/api/createBill',data);const billCode=Array.isArray(created)&&created[0]&&created[0].BillCode;if(!billCode)return res.status(502).json({ok:false,error:'ToyyibPay could not create the payment bill',detail:created});res.setHeader('Cache-Control','no-store');return res.redirect(302,TP+'/'+billCode)}catch(e){console.error(e);return res.status(500).json({ok:false,error:e&&e.message?e.message:String(e)})}};
+const {getToyyibPayConfig}=require('./config');
+let cachedCategory={};
+
+function safeReturn(v){
+  try{
+    const u=new URL(v);
+    if(u.protocol!=='https:'||!u.hostname.endsWith('.websitepublisher.ai'))return'';
+    return'https://project26518.websitepublisher.ai/payment-return.html';
+  }catch{return''}
+}
+
+async function post(url,data){
+  const r=await fetch(url,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams(data)});
+  const t=await r.text();
+  let j=t;
+  try{j=JSON.parse(t)}catch{}
+  if(!r.ok)throw new Error('ToyyibPay HTTP '+r.status+': '+String(t).slice(0,300));
+  return j;
+}
+
+async function category(cfg){
+  if(cfg.categoryCode)return cfg.categoryCode;
+  if(cachedCategory[cfg.mode])return cachedCategory[cfg.mode];
+  const c=await post(cfg.baseUrl+'/index.php/api/createCategory',{
+    catname:'AiBioTech Wallet',
+    catdescription:'AiBioTech wallet coin top ups',
+    userSecretKey:cfg.secretKey
+  });
+  const code=Array.isArray(c)&&c[0]&&c[0].CategoryCode;
+  if(!code)throw new Error('Unable to create ToyyibPay category');
+  cachedCategory[cfg.mode]=String(code);
+  return cachedCategory[cfg.mode];
+}
+
+module.exports=async function handler(req,res){
+  try{
+    if(req.method!=='GET')return res.status(405).json({ok:false,error:'GET required'});
+    const q=req.query||{};
+    const orderId=Number(q.order_id||0);
+    const orderNo=String(q.order_number||'');
+    const amount=Number(q.amount_cents||q.total_cents||0);
+    const returnSite=safeReturn(String(q.return_site||''));
+    if(!orderId||!orderNo||!Number.isInteger(amount)||amount<100||!returnSite){
+      return res.status(400).json({ok:false,error:'order_id, order_number, amount_cents and valid return_site are required'});
+    }
+
+    const cfg=getToyyibPayConfig();
+    const host=req.headers['x-forwarded-host']||req.headers.host;
+    const proto=req.headers['x-forwarded-proto']||'https';
+    const base=proto+'://'+host;
+    const code=await category(cfg);
+    const ext='AIB'+orderId;
+    const data={
+      userSecretKey:cfg.secretKey,
+      categoryCode:String(code),
+      billName:('AiBioTech '+orderNo).replace(/[^a-zA-Z0-9 _]/g,' ').slice(0,30),
+      billDescription:('Wallet top up '+orderNo).replace(/[^a-zA-Z0-9 _]/g,' ').slice(0,100),
+      billPriceSetting:'1',
+      billPayorInfo:'1',
+      billAmount:String(amount),
+      billReturnUrl:base+'/api/toyyibpay/return?return_site='+encodeURIComponent(returnSite)+'&order_number='+encodeURIComponent(orderNo),
+      billCallbackUrl:base+'/api/toyyibpay/callback',
+      billExternalReferenceNo:ext,
+      billTo:String(q.customer_name||'AiBioTech Customer').slice(0,80),
+      billEmail:String(q.customer_email||'').slice(0,120),
+      billPhone:String(q.customer_phone||'').slice(0,40),
+      billSplitPayment:'0',
+      billSplitPaymentArgs:'',
+      billPaymentChannel:'0',
+      billContentEmail:'Thank you for your AiBioTech wallet top up.',
+      billChargeToCustomer:'1',
+      billExpiryDays:'1'
+    };
+    const created=await post(cfg.baseUrl+'/index.php/api/createBill',data);
+    const billCode=Array.isArray(created)&&created[0]&&created[0].BillCode;
+    if(!billCode)return res.status(502).json({ok:false,error:'ToyyibPay could not create the payment bill',detail:created});
+    res.setHeader('Cache-Control','no-store');
+    return res.redirect(302,cfg.baseUrl+'/'+billCode);
+  }catch(e){
+    console.error(e);
+    return res.status(500).json({ok:false,error:e&&e.message?e.message:String(e)});
+  }
+};
